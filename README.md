@@ -1,6 +1,6 @@
 # xcode-runner
 
-little utility to run xcode projects from the command line on iOS Device or Simulator
+little utility to run xcode projects on iOS Device or Simulator from command line
 
 ### Build
 ```sh
