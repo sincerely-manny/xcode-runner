@@ -218,15 +218,22 @@ func main() {
 		exec.Command("xcrun", "simctl", "install", deviceUDID, appPath).Run()
 		exec.Command("xcrun", "simctl", "launch", deviceUDID, bundleIdentifier).Run()
 	} else {
-		fmt.Println("\n🔗 Deploying to Physical Device...")
-		// _, err := exec.LookPath("ios-deploy")
-		// if err != nil {
-		// 	fmt.Println("❌ ios-deploy not found. Install it with: brew install ios-deploy")
-		// 	return
-		// }
-		// exec.Command("ios-deploy", "--bundle", appPath, "--id", deviceUDID, "--debug").Run()
-		exec.Command("xcrun", "devicectl", "device", "install", "app", "--device", deviceUDID, "--bundle", appPath).Run()
-		exec.Command("xcrun", "devicectl", "device", "process", "launch", "--device", deviceUDID, "--start-stopped", bundleIdentifier).Run()
+		fmt.Println("\n📲 Installing & Launching App on Device...")
+		installCmd := exec.Command("xcrun", "devicectl", "device", "install", "app", "--device", deviceUDID, appPath)
+		installCmd.Stdout = os.Stdout
+		installCmd.Stderr = os.Stderr
+		if err := installCmd.Run(); err != nil {
+			fmt.Printf("❌ Failed to install app: %v\n", err)
+			return
+		}
+		launchCmd := exec.Command("xcrun", "devicectl", "device", "process", "launch", "--device", deviceUDID, bundleIdentifier)
+		launchCmd.Stdout = os.Stdout
+		launchCmd.Stderr = os.Stderr
+
+		if err := launchCmd.Run(); err != nil {
+			fmt.Printf("❌ Failed to launch app: %v\n", err)
+			return
+		}
 	}
 
 	fmt.Println("\n✅ Done!")
