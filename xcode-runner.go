@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -67,23 +68,55 @@ func GetSchemes() ([]string, error) {
 }
 
 func GetDevices() (map[string]string, error) {
-	cmd := exec.Command("xcrun", "simctl", "list", "devices", "--json")
+	cmd := exec.Command("xcrun", "xctrace", "list", "devices")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 
-	var deviceList DeviceList
-	err = json.Unmarshal(output, &deviceList)
-	if err != nil {
-		return nil, err
-	}
-
 	devices := make(map[string]string)
-	for _, deviceGroup := range deviceList.Devices {
-		for _, device := range deviceGroup {
-			if device.Avail {
-				devices[device.Name] = device.UDID
+	re := regexp.MustCompile(`^(.+) \(([A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}|[0-9]{8}-[0-9]{16})\)$`)
+
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	currentSection := ""
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Check section headers to determine current section
+		if strings.HasPrefix(line, "== ") {
+			currentSection = line
+			continue
+		}
+
+		// Skip empty lines and offline devices section
+		if line == "" || currentSection == "== Devices Offline ==" {
+			continue
+		}
+
+		// Process only devices from the "Devices" and "Simulators" sections
+		if currentSection == "== Devices ==" || currentSection == "== Simulators ==" {
+			// Extract the last part between parentheses (the UDID)
+			lastParenIndex := strings.LastIndex(line, "(")
+			if lastParenIndex == -1 {
+				continue
+			}
+
+			udidPart := line[lastParenIndex+1:]
+			udid := strings.TrimSuffix(udidPart, ")")
+
+			// Clean up the device name by removing the UDID part and any version info
+			deviceName := line[:lastParenIndex-1]
+
+			// If there are nested parentheses for version info, clean that up too
+			versionParenIndex := strings.LastIndex(deviceName, "(")
+			if versionParenIndex != -1 {
+				deviceName = strings.TrimSpace(deviceName[:versionParenIndex])
+			}
+
+			// Check if the UDID matches the expected format
+			if matched := re.MatchString(line); matched || (len(udid) > 0 && (strings.Contains(udid, "-") || strings.ContainsAny(udid, "0123456789ABCDEF"))) {
+				devices[deviceName] = udid
 			}
 		}
 	}
@@ -122,12 +155,12 @@ func main() {
 		fmt.Println("❌ Error fetching schemes:", err)
 		return
 	}
-
-	selectedScheme, err := PromptUser("Select a Scheme", schemes)
-	if err != nil {
-		fmt.Println("❌ Error selecting scheme:", err)
-		return
-	}
+	selectedScheme := schemes[0]
+	// selectedScheme, err := PromptUser("Select a Scheme", schemes)
+	// if err != nil {
+	// 	fmt.Println("❌ Error selecting scheme:", err)
+	// 	return
+	// }
 
 	devices, err := GetDevices()
 	if err != nil {
@@ -163,7 +196,14 @@ func main() {
 		return
 	}
 
-	buildCmd := exec.Command("xcodebuild", "-scheme", selectedScheme, "-destination", "id="+deviceUDID, "clean", "build")
+	isSim := strings.Contains(appPath, "simulator")
+
+	buildCmd := exec.Command("xcodebuild",
+		"-scheme", selectedScheme,
+		"-destination",
+		"id="+deviceUDID,
+		"-configuration", "Debug",
+		"build")
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
 	err = buildCmd.Run()
@@ -172,14 +212,21 @@ func main() {
 		return
 	}
 
-	if strings.Contains(deviceUDID, "-") {
+	if isSim {
 		fmt.Println("\n📲 Installing & Launching App on Simulator...")
 		exec.Command("xcrun", "simctl", "bootstatus", deviceUDID, "-b").Run()
 		exec.Command("xcrun", "simctl", "install", deviceUDID, appPath).Run()
 		exec.Command("xcrun", "simctl", "launch", deviceUDID, bundleIdentifier).Run()
 	} else {
 		fmt.Println("\n🔗 Deploying to Physical Device...")
-		exec.Command("ios-deploy", "--bundle", "build/Debug-iphoneos/*.app", "--id", deviceUDID, "--debug").Run()
+		// _, err := exec.LookPath("ios-deploy")
+		// if err != nil {
+		// 	fmt.Println("❌ ios-deploy not found. Install it with: brew install ios-deploy")
+		// 	return
+		// }
+		// exec.Command("ios-deploy", "--bundle", appPath, "--id", deviceUDID, "--debug").Run()
+		exec.Command("xcrun", "devicectl", "device", "install", "app", "--device", deviceUDID, "--bundle", appPath).Run()
+		exec.Command("xcrun", "devicectl", "device", "process", "launch", "--device", deviceUDID, "--start-stopped", bundleIdentifier).Run()
 	}
 
 	fmt.Println("\n✅ Done!")
