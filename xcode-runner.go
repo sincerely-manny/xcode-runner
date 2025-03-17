@@ -21,10 +21,6 @@ type Device struct {
 	Avail bool   `json:"isAvailable"`
 }
 
-type DeviceList struct {
-	Devices map[string][]Device `json:"devices"`
-}
-
 type BuildSettings struct {
 	BUILT_PRODUCTS_DIR        string `json:"BUILT_PRODUCTS_DIR"`
 	CONTENTS_FOLDER_PATH      string `json:"CONTENTS_FOLDER_PATH"`
@@ -196,6 +192,7 @@ func main() {
 		return
 	}
 
+	// TODO: Fix sim/bare distinction. Get it from build settings maybe?
 	isSim := strings.Contains(appPath, "simulator")
 
 	buildCmd := exec.Command("xcodebuild",
